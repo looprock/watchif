@@ -1,0 +1,77 @@
+#!/usr/bin/env python
+import re
+import sys
+from time import sleep
+import subprocess
+import shlex
+
+debug = True
+
+if len(sys.argv) < 3:
+    print "Usage: %s [interface: re eth0] [destination to trace re wwww.google.com]" % sys.argv[0]
+    sys.exit(1)
+
+
+def bug(string):
+    if debug:
+        print "DEBUG - %s" % string
+
+
+def comm(command):
+        process = subprocess.Popen(shlex.split(command), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        out, error = process.communicate()
+        return out
+
+
+def getinterfaces():
+    ret = {}
+    f = open("/proc/net/dev", "r")
+    data = f.read()
+    f.close()
+    r = re.compile("[:\s]+")
+    lines = re.split("[\r\n]+", data)
+    for line in lines[2:]:
+        columns = r.split(line)
+        if len(columns) < 18:
+            continue
+        info = {}
+        info["rx_bytes"] = columns[2]
+        info["rx_packets"] = columns[3]
+        info["rx_errors"] = columns[4]
+        info["rx_dropped"] = columns[5]
+        info["rx_fifo"] = columns[6]
+        info["rx_frame"] = columns[7]
+        info["rx_compressed"] = columns[8]
+        info["rx_multicast"] = columns[9]
+        info["tx_bytes"] = columns[10]
+        info["tx_packets"] = columns[11]
+        info["tx_errors"] = columns[12]
+        info["tx_dropped"] = columns[13]
+        info["tx_fifo"] = columns[14]
+        info["tx_frame"] = columns[15]
+        info["tx_compressed"] = columns[16]
+        info["tx_multicast"] = columns[17]
+        iface = columns[1]
+        ret[iface] = info
+    return ret
+
+interfaces = getinterfaces()
+base_tx_dropped = interfaces[sys.argv[1]]['tx_dropped']
+base_rx_dropped = interfaces[sys.argv[1]]['rx_dropped']
+bug("base_tx_dropped: %s" % base_tx_dropped)
+bug("base_rx_dropped: %s" % base_rx_dropped)
+while True:
+    dropped = False
+    interfaces = getinterfaces()
+    if interfaces[sys.argv[1]]['tx_dropped'] != base_tx_dropped:
+        dropped = True
+        base_tx_dropped = interfaces[sys.argv[1]]['tx_dropped']
+        bug("base_tx_dropped now changed to %s" % interfaces[sys.argv[1]]['tx_dropped'])
+    if interfaces[sys.argv[1]]['rx_dropped'] != base_rx_dropped:
+        dropped = True
+        base_rx_dropped = interfaces[sys.argv[1]]['rx_dropped']
+        bug("base_rx_dropped now changed to %s" % interfaces[sys.argv[1]]['rx_dropped'])
+    if dropped:
+        result = comm('mtr -w -c 10 %s' % sys.argv[2])
+        print result
+    sleep(2)
